@@ -1,0 +1,1 @@
+a full stack productivity app with a pomodoro timed bear that studies with you, intakes your subjects and courses and recommends you youtube videos for the same. Also having scraped your timetable, will remind u if your exams are near and will remind you to focus on your weak subjects as well based on your past exam marks.
