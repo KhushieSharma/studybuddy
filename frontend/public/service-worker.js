@@ -23,6 +23,12 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 const isNavigationRequest = (request) => request.mode === 'navigate';
 const isStaticAsset = (request) =>
   request.destination === 'script' ||
