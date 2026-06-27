@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import * as faceapi from 'face-api.js';
-import { Camera, CameraOff, AlertTriangle } from 'lucide-react';
+import { Camera, CameraOff, AlertTriangle, Bell } from 'lucide-react';
 import Button from '../ui/Button.jsx';
 
 const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
-const EAR_THRESHOLD = 0.18;
-const DROWSY_FRAMES_THRESHOLD = 10;
-const NO_FACE_FRAMES_THRESHOLD = 15;
+const EAR_THRESHOLD = 0.15;
+const DROWSY_FRAMES_THRESHOLD = 5;
+const NO_FACE_FRAMES_THRESHOLD = 8;
+const DETECT_INTERVAL_MS = 100;
+const ALERT_COOLDOWN_MS = 2000;
 
 const notifyUser = (title, body) => {
   if ('Notification' in window && Notification.permission === 'granted') {
@@ -38,15 +40,15 @@ const playAlertSound = async () => {
     }
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
-    gain.gain.setValueAtTime(0.4, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1200, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 0.5);
+    osc.stop(ctx.currentTime + 0.6);
   } catch (error) {
     console.error('Alert sound failed', error);
   }
@@ -66,19 +68,22 @@ export default function FocusGuard({ isRunning, onDrowsy }) {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('off');
   const [alertShown, setAlertShown] = useState(false);
+  const [debug, setDebug] = useState({ ear: 0, drowsy: 0, noFace: 0 });
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const canvasRef = useRef(null);
-  const frameRef = useRef(null);
+  const intervalRef = useRef(null);
+  const isDetectingRef = useRef(false);
   const drowsyFrameCount = useRef(0);
   const noFaceFrameCount = useRef(0);
   const lastAlertTime = useRef(0);
+  const wakeLockRef = useRef(null);
 
   const stopCamera = useCallback(() => {
-    if (frameRef.current) {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -87,14 +92,22 @@ export default function FocusGuard({ isRunning, onDrowsy }) {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+    }
     setStatus('off');
     setAlertShown(false);
+    setDebug({ ear: 0, drowsy: 0, noFace: 0 });
   }, []);
 
   const startCamera = useCallback(async () => {
     try {
       setLoading(true);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -126,66 +139,68 @@ export default function FocusGuard({ isRunning, onDrowsy }) {
     }
   }, []);
 
+  const triggerAlert = useCallback(
+    (title, message) => {
+      const now = Date.now();
+      if (now - lastAlertTime.current < ALERT_COOLDOWN_MS) return;
+      lastAlertTime.current = now;
+
+      playAlertSound();
+      if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]);
+      notifyUser(title, message);
+      setAlertShown(true);
+      onDrowsy?.();
+      setTimeout(() => setAlertShown(false), 2500);
+    },
+    [onDrowsy]
+  );
+
   const detect = useCallback(async () => {
-    if (!videoRef.current || !enabled || !isRunning) {
-      frameRef.current = requestAnimationFrame(detect);
-      return;
-    }
+    if (isDetectingRef.current || !videoRef.current || !enabled || !isRunning) return;
+    isDetectingRef.current = true;
 
-    const video = videoRef.current;
-    if (video.paused || video.ended || video.readyState < 2) {
-      frameRef.current = requestAnimationFrame(detect);
-      return;
-    }
+    try {
+      const video = videoRef.current;
+      if (video.paused || video.ended || video.readyState < 2) return;
 
-    const detection = await faceapi
-      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-      .withFaceLandmarks();
+      const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks();
 
-    if (detection) {
-      noFaceFrameCount.current = 0;
-      const leftEye = detection.landmarks.getLeftEye();
-      const rightEye = detection.landmarks.getRightEye();
-      const leftEAR = calculateEAR(leftEye);
-      const rightEAR = calculateEAR(rightEye);
-      const avgEAR = (leftEAR + rightEAR) / 2;
+      if (detection) {
+        noFaceFrameCount.current = 0;
+        const leftEye = detection.landmarks.getLeftEye();
+        const rightEye = detection.landmarks.getRightEye();
+        const leftEAR = calculateEAR(leftEye);
+        const rightEAR = calculateEAR(rightEye);
+        const avgEAR = (leftEAR + rightEAR) / 2;
 
-      if (avgEAR < EAR_THRESHOLD) {
-        drowsyFrameCount.current += 1;
+        if (avgEAR < EAR_THRESHOLD) {
+          drowsyFrameCount.current += 1;
+        } else {
+          drowsyFrameCount.current = 0;
+        }
+
+        setDebug({ ear: avgEAR.toFixed(3), drowsy: drowsyFrameCount.current, noFace: 0 });
+
+        if (drowsyFrameCount.current > DROWSY_FRAMES_THRESHOLD) {
+          triggerAlert('Wake up, buddy!', 'You look sleepy — stay focused 🧸');
+        }
       } else {
-        drowsyFrameCount.current = Math.max(0, drowsyFrameCount.current - 1);
-      }
+        noFaceFrameCount.current += 1;
+        drowsyFrameCount.current = 0;
+        setDebug({ ear: 0, drowsy: 0, noFace: noFaceFrameCount.current });
 
-      if (drowsyFrameCount.current > DROWSY_FRAMES_THRESHOLD) {
-        const now = Date.now();
-        if (now - lastAlertTime.current > 5000) {
-          lastAlertTime.current = now;
-          playAlertSound();
-          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-          notifyUser('Wake up, buddy!', 'You look sleepy — stay focused 🧸');
-          setAlertShown(true);
-          onDrowsy?.();
-          setTimeout(() => setAlertShown(false), 3000);
+        if (noFaceFrameCount.current > NO_FACE_FRAMES_THRESHOLD) {
+          triggerAlert('Where did you go?', 'Focus Guard cannot see you 🧸');
         }
       }
-    } else {
-      noFaceFrameCount.current += 1;
-      if (noFaceFrameCount.current > NO_FACE_FRAMES_THRESHOLD) {
-        const now = Date.now();
-        if (now - lastAlertTime.current > 8000) {
-          lastAlertTime.current = now;
-          playAlertSound();
-          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-          notifyUser('Where did you go?', 'Focus Guard cannot see you 🧸');
-          setAlertShown(true);
-          onDrowsy?.();
-          setTimeout(() => setAlertShown(false), 3000);
-        }
-      }
+    } catch (error) {
+      console.error('Detection error', error);
+    } finally {
+      isDetectingRef.current = false;
     }
-
-    frameRef.current = requestAnimationFrame(detect);
-  }, [enabled, isRunning, onDrowsy]);
+  }, [enabled, isRunning, triggerAlert]);
 
   useEffect(() => {
     if (enabled) {
@@ -202,12 +217,37 @@ export default function FocusGuard({ isRunning, onDrowsy }) {
 
   useEffect(() => {
     if (enabled && isRunning && modelsLoaded) {
-      frameRef.current = requestAnimationFrame(detect);
+      intervalRef.current = setInterval(detect, DETECT_INTERVAL_MS);
     }
     return () => {
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
   }, [enabled, isRunning, modelsLoaded, detect]);
+
+  useEffect(() => {
+    if (!enabled || !isRunning || !('wakeLock' in navigator)) return;
+
+    navigator.wakeLock
+      .request('screen')
+      .then((lock) => {
+        wakeLockRef.current = lock;
+        lock.addEventListener('release', () => {
+          wakeLockRef.current = null;
+        });
+      })
+      .catch(() => {});
+  }, [enabled, isRunning]);
+
+  const handleTestAlert = () => {
+    playAlertSound();
+    if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+    notifyUser('Test alert', 'Focus Guard is working 🧸');
+    setAlertShown(true);
+    setTimeout(() => setAlertShown(false), 2500);
+  };
 
   return (
     <div className="space-y-3">
@@ -230,12 +270,27 @@ export default function FocusGuard({ isRunning, onDrowsy }) {
         </Button>
       </div>
 
+      {enabled && status === 'error' && (
+        <div className="p-3 rounded-2xl bg-rose-50 border border-rose-100 text-rose-700 text-sm">
+          Camera or face-detection models failed. Check permissions and internet.
+        </div>
+      )}
+
+      {enabled && status === 'active' && (
+        <button
+          onClick={handleTestAlert}
+          className="flex items-center gap-2 text-xs text-violet-600 hover:text-violet-700 font-medium"
+        >
+          <Bell className="w-3 h-3" /> Test alert sound & notification
+        </button>
+      )}
+
       {enabled && (
         <div className="relative rounded-2xl overflow-hidden bg-stone-900 aspect-video">
           <video ref={videoRef} className="w-full h-full object-cover opacity-80" muted playsInline />
           <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
           <div className="absolute bottom-2 left-2 text-[10px] text-white/70 bg-black/40 px-2 py-1 rounded-lg">
-            {status === 'active' ? 'Monitoring...' : status === 'error' ? 'Camera error' : 'Starting...'}
+            {status === 'active' ? `EAR ${debug.ear} | Drowsy ${debug.drowsy} | NoFace ${debug.noFace}` : status === 'error' ? 'Camera error' : 'Starting...'}
           </div>
         </div>
       )}
