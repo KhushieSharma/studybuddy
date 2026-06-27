@@ -155,8 +155,8 @@ export default function Focus() {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6">
-        <Card className="md:col-span-2 flex flex-col items-center justify-center !p-5">
+      <div className="grid md:grid-cols-3 gap-6 items-start">
+        <Card className="md:col-span-2 flex flex-col items-center justify-start self-start !p-5">
           <div className="relative mb-4">
             <svg width="240" height="240" className="transform -rotate-90">
               <circle cx="120" cy="120" r="100" stroke="#e7e5e4" strokeWidth="12" fill="none" />
