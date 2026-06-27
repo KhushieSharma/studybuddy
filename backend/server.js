@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import morgan from 'morgan';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import connectDB from './config/db.js';
 import { errorHandler, notFound } from './middleware/errorMiddleware.js';
@@ -72,7 +74,18 @@ app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/admin', adminRoutes);
 
-app.use(notFound);
+app.use('/api', notFound);
+
+if (process.env.NODE_ENV === 'production') {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  app.use(express.static(path.join(__dirname, '../frontend/dist')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, '../frontend/dist', 'index.html'));
+  });
+} else {
+  app.use(notFound);
+}
+
 app.use(errorHandler);
 
 io.on('connection', (socket) => {
