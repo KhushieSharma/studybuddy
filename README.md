@@ -79,6 +79,19 @@ npm test
 npm run build
 ```
 
+## 🚀 Deploy to Render (free)
+
+One-click deploy the full app (backend + frontend + MongoDB):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/KhushieSharma/studybuddy)
+
+After deploy:
+1. Create a free **MongoDB Atlas** cluster (or use any MongoDB URI).
+2. In the Render dashboard, add an environment variable:
+   - `MONGODB_URI` = your MongoDB connection string
+3. Render auto-generates `JWT_SECRET`. You can leave it or set your own.
+4. Once the service is live, open the Render URL on your phone and install the PWA.
+
 ## 📁 Project Structure
 
 ```
