@@ -1,5 +1,4 @@
 # StudyBuddy 🧸
-
 **StudyBuddy** is a modern, AI-powered productivity and study companion app built for college students — but flexible enough for coders, readers, freelancers, and lifelong learners.
 > Notion + Forest + Duolingo + Pinterest + Spotify focus mode — all in one cozy, aesthetic app.
 
