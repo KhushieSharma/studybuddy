@@ -1,7 +1,6 @@
 # StudyBuddy 🧸
 **StudyBuddy** is a modern, AI-powered productivity and study companion app built for college students — but flexible enough for coders, readers, freelancers, and lifelong learners.
 > Notion + Forest + Duolingo + Pinterest + Spotify focus mode — all in one cozy, aesthetic app.
-
 ## 💼 CV / Project Introduction
 
 **StudyBuddy** is a full-stack productivity PWA I built to help students study smarter. It combines a Pomodoro focus timer, AI-powered study recommendations, goal tracking, journaling, analytics, exam monitoring, and a camera-based drowsiness detector. The app uses JWT authentication, MongoDB for data persistence, cron jobs for notifications, and a service worker for offline support and automatic updates across devices.
@@ -24,9 +23,7 @@ Built with **React, Vite, Tailwind CSS, Node.js, Express, and MongoDB**, it demo
 - 🎓 Branch/semester dropdown during signup; NIT KKR curriculum subjects auto-loaded for smarter recommendations
 - 🛡️ Admin Panel for manual data override and announcements
 - 📱 Fully Responsive Design
-
 ## 🛠 Tech Stack
-
 **Frontend**
 - React + Vite
 - Tailwind CSS v4
